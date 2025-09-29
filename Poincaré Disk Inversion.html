@@ -29,18 +29,16 @@
             align-items: center;
             padding-top: 10px;
             z-index: 10;
-            transition: width 0.3s ease;
+            transition: width 0.3s ease, left 0.3s ease;
         }
         
         #toolbar.closed {
-            width: 0;
-            padding: 10px 0;
-            overflow: hidden;
+            left: -50px;
         }
 
         #toolbar-toggle {
-            position: absolute;
-            left: 100%;
+            position: fixed;
+            left: 50px;
             top: 50%;
             transform: translateY(-50%);
             width: 20px;
@@ -53,11 +51,15 @@
             align-items: center;
             justify-content: center;
             border-radius: 0 5px 5px 0;
+            z-index: 11;
+            transition: left 0.3s ease;
         }
         
-        #toolbar.closed #toolbar-toggle {
+        body.toolbar-closed #toolbar-toggle {
+            left: 0;
             border-left: 1px solid #ccc;
         }
+
 
         .tool-button {
             width: 32px;
@@ -97,6 +99,7 @@
             display: flex;
             padding-left: 50px; /* Toolbar width */
             transition: padding-left 0.3s ease;
+            position: relative;
         }
         
         #content-wrapper.toolbar-closed {
@@ -173,6 +176,42 @@
             display: none;
             z-index: 5;
         }
+        
+        #history-controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 10;
+            display: flex;
+            gap: 5px;
+        }
+
+        #history-controls button {
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid #ccc;
+            background-color: #fff;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        #history-controls button:hover:not(:disabled) {
+            background-color: #f0f0f0;
+        }
+        
+        #history-controls button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+        
+        #history-controls svg {
+            width: 20px;
+            height: 20px;
+        }
+
 
     </style>
 </head>
@@ -231,10 +270,19 @@
         <div class="tool-button" id="reset-button" title="전체 초기화 (R)">
             <svg viewBox="0 0 24 24"><path fill="currentColor" d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z" /></svg>
         </div>
-        <div id="toolbar-toggle">&lt;</div>
     </div>
 
+    <div id="toolbar-toggle">&lt;</div>
+
     <div id="content-wrapper">
+        <div id="history-controls">
+            <button id="undo-btn" title="Undo (Ctrl+Z)">
+                <svg viewBox="0 0 24 24"><path fill="currentColor" d="M12.5,8C9.85,8 7.45,9 5.6,10.6L2,7V16H11L7.38,12.38C8.77,11.22 10.54,10.5 12.5,10.5C16.04,10.5 19.05,12.81 20.1,16L22.47,15.22C21.08,11.03 17.15,8 12.5,8Z" /></svg>
+            </button>
+            <button id="redo-btn" title="Redo (Ctrl+Shift+Z)">
+                <svg viewBox="0 0 24 24"><path fill="currentColor" d="M18.4,10.6C16.55,9 14.15,8 11.5,8C6.85,8 2.92,11.03 1.53,15.22L3.9,16C4.95,12.81 7.96,10.5 11.5,10.5C13.46,10.5 15.23,11.22 16.62,12.38L13,16H22V7L18.4,10.6Z" /></svg>
+            </button>
+        </div>
         <div id="input-view" class="view">
             <div class="view-label">입력</div>
             <svg id="input-svg"></svg>
@@ -263,6 +311,8 @@
         const contentWrapper = document.getElementById('content-wrapper');
         const resetButton = document.getElementById('reset-button');
         const infoBox = document.querySelector('#input-view .info-box');
+        const undoBtn = document.getElementById('undo-btn');
+        const redoBtn = document.getElementById('redo-btn');
 
         // --- State ---
         let camera = { x: 0, y: 0, zoom: 1 };
@@ -270,12 +320,49 @@
         let activeTool = 'select';
         let constructionState = { tool: null, step: 0, selections: [], tempPoint: null };
         let snapPoint = null;
-        let dragInfo = { target: null, start: null, camera: false };
+        let dragInfo = { target: null, start: null, camera: false, moved: false };
         let nextId = 1; // 0 is reserved for the origin
-        let colors = { input: 'yellow', output: '#00bcd4' };
+        let colors = { input: '#F3E3C3', output: '#00bcd4' };
+        
+        let undoStack = [];
+        let redoStack = [];
+
 
         const INVERSION_RADIUS = 200;
         const INVERSION_CENTER = { x: 0, y: 0 };
+
+        // --- History Management ---
+        function updateHistoryButtons() {
+            undoBtn.disabled = undoStack.length === 0;
+            redoBtn.disabled = redoStack.length === 0;
+        }
+
+        function saveState() {
+            redoStack = [];
+            undoStack.push(JSON.parse(JSON.stringify({ objects, nextId })));
+            updateHistoryButtons();
+        }
+
+        function undo() {
+            if (undoStack.length === 0) return;
+            redoStack.push(JSON.parse(JSON.stringify({ objects, nextId })));
+            const prevState = undoStack.pop();
+            objects = prevState.objects;
+            nextId = prevState.nextId;
+            render();
+            updateHistoryButtons();
+        }
+
+        function redo() {
+            if (redoStack.length === 0) return;
+            undoStack.push(JSON.parse(JSON.stringify({ objects, nextId })));
+            const nextState = redoStack.pop();
+            objects = nextState.objects;
+            nextId = nextState.nextId;
+            render();
+            updateHistoryButtons();
+        }
+
 
         // --- Geometry & Inversion Logic ---
         function getPointById(id) {
@@ -293,32 +380,23 @@
 
         function invertObject(obj) {
             switch (obj.type) {
-                // Point inversion is the basis for all other inversions.
                 case 'point':
                     return { type: 'point', ...invertPoint(obj) };
-
-                // Property 1 & 2: Lines
                 case 'line': {
                     const p1 = getPointById(obj.p1Id);
                     const p2 = getPointById(obj.p2Id);
                     if (!p1 || !p2) return { type: 'none' };
-
-                    // Check if the line passes through the center of inversion (O).
                     const isCollinearWithOrigin = Math.abs((p2.y - p1.y) * (INVERSION_CENTER.x - p1.x) - (p2.x - p1.x) * (INVERSION_CENTER.y - p1.y)) < 1e-9;
 
                     if (isCollinearWithOrigin) {
-                        // Property 1: A line through O inverts to itself.
                         return { type: 'line', p1Id: obj.p1Id, p2Id: obj.p2Id };
                     } else {
-                        // Property 2: A line not through O inverts to a circle through O.
                         const p1_inv = invertPoint(p1);
                         const p2_inv = invertPoint(p2);
                         const circleGeom = getCircleFromPoints(p1_inv, p2_inv, INVERSION_CENTER);
                         return { type: 'circle', ...circleGeom };
                     }
                 }
-
-                // Property 2, 3, 4: Circles
                 case 'circle': {
                     const center = getPointById(obj.centerId);
                     const radiusPt = getPointById(obj.radiusId);
@@ -330,24 +408,19 @@
                     
                     const distCenterToOriginSq = (cx - INVERSION_CENTER.x)**2 + (cy - INVERSION_CENTER.y)**2;
 
-                    // Property 4: Check for orthogonality. An orthogonal circle inverts to itself.
                     const isOrthogonal = Math.abs(distCenterToOriginSq - (r * r + INVERSION_RADIUS * INVERSION_RADIUS)) < 1e-5;
                     
                     if (isOrthogonal) {
                         return { type: 'circle', centerId: obj.centerId, radiusId: obj.radiusId };
                     }
 
-                    // Property 2: Check if circle passes through O. It inverts to a line not through O.
                     if (Math.abs(distCenterToOriginSq - r * r) < 1e-6) {
-                        // The inverted line is perpendicular to the line connecting O and the circle's center.
                         const p_diam_opp = { x: 2 * cx - INVERSION_CENTER.x, y: 2 * cy - INVERSION_CENTER.y};
                         const p_inv = invertPoint(p_diam_opp);
                         
-                        // Vector from origin to center
                         const norm_dx = cx - INVERSION_CENTER.x;
                         const norm_dy = cy - INVERSION_CENTER.y;
 
-                        // Perpendicular vector for the line's direction
                         const dir_dx = -norm_dy;
                         const dir_dy = norm_dx;
 
@@ -356,7 +429,6 @@
 
                         return { type: 'line', p1: pA, p2: pB };
                     } else {
-                        // Property 3: A circle not through O inverts to another circle not through O.
                         const pC_inv = invertPoint({ x: cx + r, y: cy });
                         const pD_inv = invertPoint({ x: cx - r, y: cy });
                         
@@ -607,14 +679,17 @@
         function getClosestPointObject(worldPos) {
             let closestPoint = null;
             let min_dist_sq = (5 / camera.zoom)**2;
-            let distSq = (worldPos.x - INVERSION_CENTER.x)**2 + (worldPos.y - INVERSION_CENTER.y)**2;
-            if (distSq < min_dist_sq) {
-                min_dist_sq = distSq;
+
+            // Include origin in this check
+            const distSqOrigin = (worldPos.x - INVERSION_CENTER.x)**2 + (worldPos.y - INVERSION_CENTER.y)**2;
+            if (distSqOrigin < min_dist_sq) {
+                min_dist_sq = distSqOrigin;
                 closestPoint = { type: 'point', id: 0, x: INVERSION_CENTER.x, y: INVERSION_CENTER.y };
             }
+
             for (const obj of objects) {
                 if (obj.type === 'point') {
-                    distSq = (obj.x - worldPos.x)**2 + (obj.y - worldPos.y)**2;
+                    const distSq = (obj.x - worldPos.x)**2 + (obj.y - worldPos.y)**2;
                     if (distSq < min_dist_sq) {
                         min_dist_sq = distSq;
                         closestPoint = obj;
@@ -796,12 +871,14 @@
 
             // Execute construction logic
             if (tool === 'perp_bisector' && step === 1) {
+                saveState();
                 const [p1, p2] = selections;
                 const midX = (p1.x + p2.x)/2, midY = (p1.y + p2.y)/2, dx = p2.x - p1.x, dy = p2.y - p1.y;
                 const p3 = {type:'point', id:nextId++, x:midX-dy, y:midY+dx}, p4 = {type:'point', id:nextId++, x:midX+dy, y:midY-dx};
                 objects.push(p3, p4, {type:'line', id:nextId++, p1Id: p3.id, p2Id: p4.id});
                 resetConstruction();
             } else if (tool === 'perp_from_point' && step === 1) {
+                saveState();
                 const [point, line] = selections;
                 const pA=getPointById(line.p1Id), pB=getPointById(line.p2Id);
                 const l2=(pA.x-pB.x)**2 + (pA.y-pB.y)**2; if(l2 < 1e-9) { resetConstruction(); return; }
@@ -810,6 +887,7 @@
                 objects.push(projPoint, {type:'line',id:nextId++,p1Id:point.id,p2Id:projPoint.id});
                 resetConstruction();
             } else if (tool === 'perp_on_line' && step === 1) {
+                saveState();
                 const [line, point] = selections;
                 const pA=getPointById(line.p1Id), pB=getPointById(line.p2Id);
                 const dx=pB.x-pA.x, dy=pB.y-pA.y;
@@ -817,6 +895,7 @@
                 objects.push(p_end, {type:'line',id:nextId++,p1Id:point.id,p2Id:p_end.id});
                 resetConstruction();
             } else if (tool === 'angle_bisector' && step === 2) {
+                saveState();
                 const [pA, pB, pC] = selections; // pB is vertex
                 const v1x=pA.x-pB.x, v1y=pA.y-pB.y, v2x=pC.x-pB.x, v2y=pC.y-pB.y;
                 const l1=Math.sqrt(v1x*v1x+v1y*v1y), l2=Math.sqrt(v2x*v2x+v2y*v2y);
@@ -841,9 +920,15 @@
             switch (activeTool) {
                 case 'select':
                     dragInfo.target = getObjectAt(worldPos, 'point');
-                    if (!dragInfo.target || dragInfo.target.id === 0) dragInfo.target = null;
+                    if (dragInfo.target && dragInfo.target.id !== 0) {
+                        saveState(); // Save state before starting the move
+                        dragInfo.moved = false;
+                    } else {
+                        dragInfo.target = null;
+                    }
                     break;
                 case 'point': {
+                    saveState();
                     const snapLocation = getSnapPoint(worldPos);
                     const coords = snapLocation || worldPos;
                     objects.push({ type: 'point', id: nextId++, x: coords.x, y: coords.y });
@@ -855,6 +940,7 @@
                     if (currentSnap && currentSnap.id !== undefined) {
                         targetPoint = currentSnap;
                     } else {
+                        saveState(); // Save state when adding a new point implicitly
                         const coords = currentSnap || worldPos;
                         targetPoint = { type: 'point', id: nextId++, x: coords.x, y: coords.y };
                         objects.push(targetPoint);
@@ -863,6 +949,12 @@
                          constructionState.tempPoint = { type: (activeTool==='line'?'line-temp':'circle-temp'), p1Id: targetPoint.id, radiusPt: targetPoint, p2: targetPoint, centerId: targetPoint.id };
                     } else {
                         if (targetPoint.id !== constructionState.tempPoint.p1Id) {
+                            if (!currentSnap || currentSnap.id === undefined) {
+                                // If second point was also new, the first save was sufficient.
+                            } else {
+                                // If the second point exists, we need a new history state
+                                saveState();
+                            }
                             if (activeTool==='line') objects.push({ type: 'line', id: nextId++, p1Id: constructionState.tempPoint.p1Id, p2Id: targetPoint.id });
                             else objects.push({ type: 'circle', id: nextId++, centerId: constructionState.tempPoint.centerId, radiusId: targetPoint.id });
                             constructionState.tempPoint = null;
@@ -874,6 +966,7 @@
                 case 'delete': {
                     const objectToDelete = getObjectAt(worldPos);
                     if (objectToDelete && objectToDelete.id !== 0) {
+                        saveState();
                         let idsToDelete = new Set([objectToDelete.id]);
                         if (objectToDelete.type === 'point') {
                             objects.forEach(obj => {
@@ -900,7 +993,10 @@
                 render(); return;
             }
             if (dragInfo.target) {
-                dragInfo.target.x = worldPos.x; dragInfo.target.y = worldPos.y; render();
+                dragInfo.target.x = worldPos.x;
+                dragInfo.target.y = worldPos.y; 
+                dragInfo.moved = true;
+                render();
             }
             if (constructionState.tempPoint) {
                 const finalPos = snapPoint || worldPos;
@@ -912,7 +1008,14 @@
             }
         }
         
-        function handleMouseUp(e) { dragInfo = { target: null, start: null, camera: false }; }
+        function handleMouseUp(e) {
+            if (dragInfo.target && !dragInfo.moved) {
+                // Clicked without moving, so pop the unnecessary history state.
+                undoStack.pop();
+                updateHistoryButtons();
+            }
+            dragInfo = { target: null, start: null, camera: false, moved: false };
+        }
         
         function handleWheel(e) {
             e.preventDefault();
@@ -953,7 +1056,9 @@
                 resetConstruction();
                 constructionState.tempPoint = null;
                 if (button.id === 'reset-button') {
-                    objects = []; camera = { x: 0, y: 0, zoom: 1 }; render();
+                    saveState();
+                    objects = [];
+                    render();
                 } else {
                     activeTool = button.dataset.tool;
                     if (activeTool.includes('perp_') || activeTool.includes('bisector')) {
@@ -968,7 +1073,9 @@
             });
             
             toggleButton.addEventListener('click', () => {
-                toolbar.classList.toggle('closed'); contentWrapper.classList.toggle('toolbar-closed');
+                document.body.classList.toggle('toolbar-closed');
+                toolbar.classList.toggle('closed'); 
+                contentWrapper.classList.toggle('toolbar-closed');
                 toggleButton.innerHTML = toolbar.classList.contains('closed') ? '&gt;' : '&lt;';
                 setTimeout(() => window.dispatchEvent(new Event('resize')), 300);
             });
@@ -976,6 +1083,17 @@
             window.addEventListener('resize', render);
             window.addEventListener('keydown', e => {
                 if (document.activeElement.tagName === 'INPUT') return;
+                
+                if (e.ctrlKey && e.key.toLowerCase() === 'z') {
+                    e.preventDefault();
+                    if (e.shiftKey) {
+                        redo();
+                    } else {
+                        undo();
+                    }
+                    return;
+                }
+
                 let tool;
                 switch(e.key.toLowerCase()) {
                     case 'v': tool='select'; break; case 'p': tool='point'; break; case 'l': tool='line'; break; case 'c': tool='circle'; break; case 'i': tool='intersection'; break;
@@ -985,11 +1103,16 @@
                 document.querySelector(`.tool-button[data-tool="${tool}"]`).click();
             });
             
+            undoBtn.addEventListener('click', undo);
+            redoBtn.addEventListener('click', redo);
+            
             setupColorPicker('input-view', 'input'); setupColorPicker('output-view', 'output');
         }
         
         // --- Initialization ---
         document.querySelector('.tool-button[data-tool="select"]').classList.add('active');
+        saveState(); // Save initial empty state
+        updateHistoryButtons();
         setupEventListeners();
         render();
     </script>
