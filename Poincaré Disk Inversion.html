@@ -29,11 +29,11 @@
             align-items: center;
             padding-top: 10px;
             z-index: 10;
-            transition: width 0.3s ease, left 0.3s ease;
+            transition: left 0.3s ease;
         }
         
-        #toolbar.closed {
-            left: -50px;
+        body.toolbar-closed #toolbar {
+            left: -51px;
         }
 
         #toolbar-toggle {
@@ -102,8 +102,20 @@
             position: relative;
         }
         
-        #content-wrapper.toolbar-closed {
+        body.toolbar-closed #content-wrapper {
             padding-left: 20px; /* Toggle button width */
+        }
+        
+        body.integrated-view #output-view {
+            display: none;
+        }
+        
+        body.integrated-view #input-view {
+            border-right: none;
+        }
+        
+        .inverted-object {
+            pointer-events: none;
         }
 
         .view {
@@ -136,11 +148,27 @@
             pointer-events: none;
         }
 
-        .color-picker {
+        .color-picker-wrapper {
             position: absolute;
             right: 15px;
             bottom: 15px;
             z-index: 5;
+            display: flex;
+            gap: 5px;
+            align-items: center;
+        }
+        
+        .color-picker-popup {
+            display: none;
+            flex-direction: column;
+            gap: 4px;
+            position: absolute;
+            bottom: 30px;
+            right: 0;
+            background-color: white;
+            border-radius: 4px;
+            padding: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
         }
 
         .color-picker-btn {
@@ -153,7 +181,6 @@
         }
 
         .color-picker-input {
-            display: none;
             width: 70px;
             padding: 4px 6px;
             border-radius: 4px;
@@ -162,6 +189,14 @@
             font-size: 14px;
             text-align: center;
         }
+        
+        .opacity-slider {
+            width: 80px;
+            margin: 0;
+        }
+        
+        #output-color-picker-integrated { display: none; }
+        body.integrated-view #output-color-picker-integrated { display: block; }
         
         .info-box {
             position: absolute;
@@ -210,6 +245,31 @@
         #history-controls svg {
             width: 20px;
             height: 20px;
+        }
+        
+        #view-toggle {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+            display: flex;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            overflow: hidden;
+            background-color: white;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        #view-toggle button {
+            padding: 5px 15px;
+            border: none;
+            background-color: #f0f0f0;
+            cursor: pointer;
+            color: #333;
+        }
+        #view-toggle button.active {
+            background-color: #007bff;
+            color: white;
         }
 
 
@@ -275,6 +335,10 @@
     <div id="toolbar-toggle">&lt;</div>
 
     <div id="content-wrapper">
+        <div id="view-toggle">
+            <button data-mode="split" class="active">분리</button>
+            <button data-mode="integrated">통합</button>
+        </div>
         <div id="history-controls">
             <button id="undo-btn" title="Undo (Ctrl+Z)">
                 <svg viewBox="0 0 24 24"><path fill="currentColor" d="M12.5,8C9.85,8 7.45,9 5.6,10.6L2,7V16H11L7.38,12.38C8.77,11.22 10.54,10.5 12.5,10.5C16.04,10.5 19.05,12.81 20.1,16L22.47,15.22C21.08,11.03 17.15,8 12.5,8Z" /></svg>
@@ -286,18 +350,35 @@
         <div id="input-view" class="view">
             <div class="view-label">입력</div>
             <svg id="input-svg"></svg>
-            <div class="color-picker">
-                <button class="color-picker-btn"></button>
-                <input type="text" class="color-picker-input">
+            <div class="color-picker-wrapper">
+                <div class="color-picker" id="input-color-picker">
+                    <button class="color-picker-btn"></button>
+                    <div class="color-picker-popup">
+                        <input type="text" class="color-picker-input">
+                        <input type="range" class="opacity-slider" min="0" max="1" step="0.05">
+                    </div>
+                </div>
+                <div class="color-picker" id="output-color-picker-integrated">
+                    <button class="color-picker-btn"></button>
+                    <div class="color-picker-popup">
+                        <input type="text" class="color-picker-input">
+                        <input type="range" class="opacity-slider" min="0" max="1" step="0.05">
+                    </div>
+                </div>
             </div>
             <div class="info-box"></div>
         </div>
         <div id="output-view" class="view">
             <div class="view-label">출력 (반전)</div>
             <svg id="output-svg"></svg>
-             <div class="color-picker">
-                <button class="color-picker-btn"></button>
-                <input type="text" class="color-picker-input">
+             <div class="color-picker-wrapper">
+                <div class="color-picker" id="output-color-picker-split">
+                    <button class="color-picker-btn"></button>
+                     <div class="color-picker-popup">
+                        <input type="text" class="color-picker-input">
+                        <input type="range" class="opacity-slider" min="0" max="1" step="0.05">
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -313,6 +394,7 @@
         const infoBox = document.querySelector('#input-view .info-box');
         const undoBtn = document.getElementById('undo-btn');
         const redoBtn = document.getElementById('redo-btn');
+        const viewToggle = document.getElementById('view-toggle');
 
         // --- State ---
         let camera = { x: 0, y: 0, zoom: 1 };
@@ -322,31 +404,38 @@
         let snapPoint = null;
         let dragInfo = { target: null, start: null, camera: false, moved: false };
         let nextId = 1; // 0 is reserved for the origin
-        let colors = { input: '#F3E3C3', output: '#00bcd4' };
+        let colors = { 
+            input: { hex: '#F3E3C3', alpha: 1.0 }, 
+            output: { hex: '#00BCD4', alpha: 1.0 } 
+        };
+        let viewMode = 'split';
         
         let undoStack = [];
         let redoStack = [];
-
 
         const INVERSION_RADIUS = 200;
         const INVERSION_CENTER = { x: 0, y: 0 };
 
         // --- History Management ---
         function updateHistoryButtons() {
-            undoBtn.disabled = undoStack.length === 0;
+            undoBtn.disabled = undoStack.length <= 1; // Can't undo initial state
             redoBtn.disabled = redoStack.length === 0;
         }
 
-        function saveState() {
+        function saveState(force = false) {
+            const currentState = JSON.stringify({ objects, nextId });
+            if (!force && undoStack.length > 0 && undoStack[undoStack.length - 1] === currentState) {
+                return;
+            }
             redoStack = [];
-            undoStack.push(JSON.parse(JSON.stringify({ objects, nextId })));
+            undoStack.push(currentState);
             updateHistoryButtons();
         }
 
         function undo() {
-            if (undoStack.length === 0) return;
-            redoStack.push(JSON.parse(JSON.stringify({ objects, nextId })));
-            const prevState = undoStack.pop();
+            if (undoStack.length <= 1) return;
+            redoStack.push(undoStack.pop());
+            const prevState = JSON.parse(undoStack[undoStack.length - 1]);
             objects = prevState.objects;
             nextId = prevState.nextId;
             render();
@@ -355,18 +444,18 @@
 
         function redo() {
             if (redoStack.length === 0) return;
-            undoStack.push(JSON.parse(JSON.stringify({ objects, nextId })));
-            const nextState = redoStack.pop();
+            const nextStateJSON = redoStack.pop();
+            undoStack.push(nextStateJSON);
+            const nextState = JSON.parse(nextStateJSON);
             objects = nextState.objects;
             nextId = nextState.nextId;
             render();
             updateHistoryButtons();
         }
 
-
         // --- Geometry & Inversion Logic ---
         function getPointById(id) {
-            if (id === 0) return { type: 'point', id: 0, x: INVERSION_CENTER.x, y: INVERSION_CENTER.y };
+            if (id === 0) return { type: 'point', id: 0, x: INVERSION_CENTER.x, y: INVERSION_CENTER.y, dependency: null };
             return objects.find(obj => obj.id === id && obj.type === 'point');
         }
         
@@ -379,13 +468,14 @@
         }
 
         function invertObject(obj) {
-            switch (obj.type) {
+             switch (obj.type) {
                 case 'point':
                     return { type: 'point', ...invertPoint(obj) };
                 case 'line': {
                     const p1 = getPointById(obj.p1Id);
                     const p2 = getPointById(obj.p2Id);
                     if (!p1 || !p2) return { type: 'none' };
+
                     const isCollinearWithOrigin = Math.abs((p2.y - p1.y) * (INVERSION_CENTER.x - p1.x) - (p2.x - p1.x) * (INVERSION_CENTER.y - p1.y)) < 1e-9;
 
                     if (isCollinearWithOrigin) {
@@ -460,6 +550,21 @@
             };
         }
 
+        function hexToRgba(hex, alpha) {
+            let c;
+            if (/^#([A-Fa-f0-9]{3}){1,2}$/.test(hex)) {
+                c = hex.substring(1).split('');
+                if (c.length === 3) {
+                    c = [c[0], c[0], c[1], c[1], c[2], c[2]];
+                }
+                c = '0x' + c.join('');
+                return `rgba(${[(c >> 16) & 255, (c >> 8) & 255, c & 255].join(',')},${alpha})`;
+            }
+             // Fallback for named colors, won't support alpha but won't crash
+            return hex;
+        }
+
+
         // --- Drawing Logic ---
         function createSvgElement(tag, attrs) {
             const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
@@ -467,7 +572,7 @@
             return el;
         }
 
-        function drawObject(svg, obj, color) {
+        function drawObject(svg, obj, color, isInverted = false) {
             let tempObj = obj;
             if (obj.type.endsWith('-temp')) {
                 const p1 = getPointById(obj.p1Id || obj.centerId);
@@ -478,13 +583,15 @@
                     tempObj = { type: 'circle', cx: p1.x, cy: p1.y, r: r, id: -1 };
                 }
             }
+            
+            const rgbaColor = hexToRgba(color.hex, color.alpha);
 
             const transform = `translate(${svg.clientWidth / 2} ${svg.clientHeight / 2}) scale(${camera.zoom}) translate(${camera.x} ${camera.y})`;
+            let element;
             
             switch (tempObj.type) {
                 case 'point': {
-                    const element = createSvgElement('circle', { cx: tempObj.x, cy: tempObj.y, r: 1.7 / camera.zoom, fill: 'black', stroke: 'black', 'stroke-width': 0.5 / camera.zoom, transform, 'data-id': tempObj.id });
-                    if (element) svg.appendChild(element);
+                    element = createSvgElement('circle', { cx: tempObj.x, cy: tempObj.y, r: 1.7 / camera.zoom, fill: 'black', stroke: 'black', 'stroke-width': 0.5 / camera.zoom, transform, 'data-id': tempObj.id });
                     break;
                 }
                 case 'line': {
@@ -492,35 +599,19 @@
                     if(tempObj.p1Id !== undefined) { p1 = getPointById(tempObj.p1Id); p2 = getPointById(tempObj.p2Id); }
                     if (!p1 || !p2 || !isFinite(p1.x) || !isFinite(p2.x)) return;
                     
-                    const group = createSvgElement('g', { transform, 'data-id': tempObj.id });
+                    element = createSvgElement('g', { transform, 'data-id': tempObj.id });
                     
-                    const solidLine = createSvgElement('line', {
-                        x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y,
-                        stroke: color, 'stroke-width': 3 / camera.zoom
-                    });
-                    group.appendChild(solidLine);
+                    const solidLine = createSvgElement('line', { x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y, stroke: rgbaColor, 'stroke-width': 3 / camera.zoom });
+                    element.appendChild(solidLine);
 
-                    const dx = p2.x - p1.x;
-                    const dy = p2.y - p1.y;
-                    const len = Math.sqrt(dx*dx + dy*dy);
+                    const dx = p2.x - p1.x, dy = p2.y - p1.y, len = Math.sqrt(dx*dx + dy*dy);
                     if (len > 1e-6) {
-                        const L = 10000;
-                        const udx = dx / len;
-                        const udy = dy / len;
-
-                        const ext1 = createSvgElement('line', {
-                            x1: p2.x, y1: p2.y, x2: p2.x + udx * L, y2: p2.y + udy * L,
-                            stroke: color, 'stroke-width': 3 / camera.zoom, 'stroke-dasharray': `${8 / camera.zoom} ${4 / camera.zoom}`
-                        });
-
-                        const ext2 = createSvgElement('line', {
-                            x1: p1.x, y1: p1.y, x2: p1.x - udx * L, y2: p1.y - udy * L,
-                            stroke: color, 'stroke-width': 3 / camera.zoom, 'stroke-dasharray': `${8 / camera.zoom} ${4 / camera.zoom}`
-                        });
-                        group.appendChild(ext1);
-                        group.appendChild(ext2);
+                        const L = 10000, udx = dx / len, udy = dy / len;
+                        const ext1 = createSvgElement('line', { x1: p2.x, y1: p2.y, x2: p2.x + udx * L, y2: p2.y + udy * L, stroke: rgbaColor, 'stroke-width': 3 / camera.zoom, 'stroke-dasharray': `${8 / camera.zoom} ${4 / camera.zoom}`});
+                        const ext2 = createSvgElement('line', { x1: p1.x, y1: p1.y, x2: p1.x - udx * L, y2: p1.y - udy * L, stroke: rgbaColor, 'stroke-width': 3 / camera.zoom, 'stroke-dasharray': `${8 / camera.zoom} ${4 / camera.zoom}`});
+                        element.appendChild(ext1);
+                        element.appendChild(ext2);
                     }
-                    svg.appendChild(group);
                     break;
                 }
                 case 'circle': {
@@ -532,10 +623,13 @@
                         r = Math.sqrt((radiusPt.x - center.x)**2 + (radiusPt.y - center.y)**2);
                     }
                     if (r === undefined || !isFinite(cx) || !isFinite(r)) return;
-                    const element = createSvgElement('circle', { cx, cy, r, stroke: color, 'stroke-width': 3/camera.zoom, fill: 'none', transform, 'data-id': tempObj.id });
-                    if (element) svg.appendChild(element);
+                    element = createSvgElement('circle', { cx, cy, r, stroke: rgbaColor, 'stroke-width': 3/camera.zoom, fill: 'none', transform, 'data-id': tempObj.id });
                     break;
                 }
+            }
+             if (element) {
+                if (isInverted) element.classList.add('inverted-object');
+                svg.appendChild(element);
             }
         }
         
@@ -556,120 +650,148 @@
             const transform = `translate(${svg.clientWidth/2} ${svg.clientHeight/2}) scale(${camera.zoom}) translate(${camera.x} ${camera.y})`;
             svg.appendChild(createSvgElement('circle', { cx: point.x, cy: point.y, r: 10/camera.zoom, fill: 'none', stroke: '#007bff', 'stroke-width': 2/camera.zoom, transform }));
         }
+        
+        function updateDependentPoints() {
+            let changed = false;
+            objects.forEach(obj => {
+                if (obj.type === 'point' && obj.dependency) {
+                    let newPos;
+                    if (obj.dependency.type === 'inversion') {
+                        const target = getPointById(obj.dependency.targetId);
+                        if (target) newPos = invertPoint(target);
+                    }
+                    if (newPos && (obj.x !== newPos.x || obj.y !== newPos.y)) {
+                        obj.x = newPos.x;
+                        obj.y = newPos.y;
+                        changed = true;
+                    }
+                }
+            });
+            return changed;
+        }
+
 
         function render() {
+            if (updateDependentPoints()) {
+                // If dependencies changed, just re-render without creating a loop
+            }
             requestAnimationFrame(() => {
-                inputSvg.innerHTML = ''; outputSvg.innerHTML = '';
-                [inputSvg, outputSvg].forEach(svg => { drawOrigin(svg); drawInversionCircle(svg); });
+                inputSvg.innerHTML = '';
+                outputSvg.innerHTML = '';
 
-                objects.forEach(obj => {
-                    drawObject(inputSvg, obj, colors.input);
-                    drawObject(outputSvg, invertObject(obj), colors.output);
-                });
+                if (viewMode === 'split') {
+                    drawOrigin(inputSvg);
+                    drawInversionCircle(inputSvg);
+                    drawOrigin(outputSvg);
+                    drawInversionCircle(outputSvg);
+
+                    objects.forEach(obj => {
+                        drawObject(inputSvg, obj, colors.input);
+                        drawObject(outputSvg, invertObject(obj), colors.output, true);
+                    });
+                } else { // Integrated mode
+                    drawOrigin(inputSvg);
+                    drawInversionCircle(inputSvg);
+                    objects.forEach(obj => {
+                        drawObject(inputSvg, obj, colors.input);
+                        drawObject(inputSvg, invertObject(obj), colors.output, true);
+                    });
+                }
                 
                 const showSnap = snapPoint && (activeTool !== 'select' || constructionState.tool);
                 if (showSnap) drawSnapHighlight(inputSvg, snapPoint);
-                if (constructionState.tempPoint) drawObject(inputSvg, constructionState.tempPoint, 'rgba(255, 255, 0, 0.5)');
+                if (constructionState.tempPoint) drawObject(inputSvg, constructionState.tempPoint, {hex: colors.input.hex, alpha: 0.5 });
             });
         }
         
         // --- Tool & Construction Logic ---
-        function lineLineIntersection(l1p1, l1p2, l2p1, l2p2) {
-            const d = (l1p1.x - l1p2.x) * (l2p1.y - l2p2.y) - (l1p1.y - l1p2.y) * (l2p1.x - l2p2.x);
-            if (Math.abs(d) < 1e-9) return null; // Parallel
+        function getGeom(obj, getInverted = false) {
+             const targetObj = getInverted ? invertObject(obj) : obj;
+             if (targetObj.type === 'none') return null;
 
-            const t = ((l1p1.x - l2p1.x) * (l2p1.y - l2p2.y) - (l1p1.y - l2p1.y) * (l2p1.x - l2p2.x)) / d;
-            const ix = l1p1.x + t * (l1p2.x - l1p1.x);
-            const iy = l1p1.y + t * (l1p2.y - l1p1.y);
-
-            return { x: ix, y: iy };
-        }
-
-        function lineCircleIntersections(p1, p2, c, r) {
-            const dx = p2.x - p1.x;
-            const dy = p2.y - p1.y;
-            const A = dx * dx + dy * dy;
-            const B = 2 * (dx * (p1.x - c.x) + dy * (p1.y - c.y));
-            const C = (p1.x - c.x) * (p1.x - c.x) + (p1.y - c.y) * (p1.y - c.y) - r * r;
-
-            const det = B * B - 4 * A * C;
-            if (det < 1e-9) return []; // No or one (tangent) intersection
-
-            const intersections = [];
-            const t1 = (-B + Math.sqrt(det)) / (2 * A);
-            intersections.push({ x: p1.x + t1 * dx, y: p1.y + t1 * dy });
-
-            if (det > 1e-9) { // Two distinct intersections
-                const t2 = (-B - Math.sqrt(det)) / (2 * A);
-                intersections.push({ x: p1.x + t2 * dx, y: p1.y + t2 * dy });
-            }
-            return intersections;
-        }
-
-        function circleCircleIntersections(c1, r1, c2, r2) {
-            const dx = c2.x - c1.x;
-            const dy = c2.y - c1.y;
-            const d_sq = dx * dx + dy * dy;
-            const d = Math.sqrt(d_sq);
-
-            if (d > r1 + r2 || d < Math.abs(r1 - r2) || d === 0) return []; // No intersection or concentric
-
-            const a = (r1 * r1 - r2 * r2 + d_sq) / (2 * d);
-            const h_sq = r1 * r1 - a * a;
-            if (h_sq < 0) return []; // Should be caught by first condition but for safety
-            const h = Math.sqrt(h_sq);
-
-            const x2 = c1.x + a * (dx / d);
-            const y2 = c1.y + a * (dy / d);
-
-            const intersections = [];
-            intersections.push({ x: x2 + h * (dy / d), y: y2 - h * (dx / d) });
-
-            if (h > 1e-9) { // If not tangent
-                intersections.push({ x: x2 - h * (dy / d), y: y2 + h * (dx / d) });
-            }
-            return intersections;
-        }
-
-        function getAllIntersections() {
-            const intersections = [];
-            const geometry = objects.map(obj => {
-                switch (obj.type) {
-                    case 'line': {
-                        const p1 = getPointById(obj.p1Id);
-                        const p2 = getPointById(obj.p2Id);
-                        if (!p1 || !p2) return null;
-                        return { type: 'line', p1, p2 };
-                    }
-                    case 'circle': {
-                        const center = getPointById(obj.centerId);
-                        const radiusPt = getPointById(obj.radiusId);
-                        if (!center || !radiusPt) return null;
-                        const r = Math.sqrt((radiusPt.x - center.x)**2 + (radiusPt.y - center.y)**2);
-                        return { type: 'circle', center, r };
-                    }
-                    default:
-                        return null;
+             switch(targetObj.type) {
+                case 'line': {
+                    let p1 = targetObj.p1, p2 = targetObj.p2;
+                    if(targetObj.p1Id !== undefined) { p1 = getPointById(targetObj.p1Id); p2 = getPointById(targetObj.p2Id); }
+                    if (!p1 || !p2) return null;
+                    return { type: 'line', p1, p2, originalId: obj.id, isInverted: getInverted };
                 }
-            }).filter(Boolean); // Filter out points and nulls
+                case 'circle': {
+                    let { cx, cy, r } = targetObj;
+                    if(targetObj.centerId !== undefined) {
+                        const center = getPointById(targetObj.centerId), radiusPt = getPointById(targetObj.radiusId);
+                        if(!center || !radiusPt) return null;
+                        cx = center.x; cy = center.y;
+                        r = Math.sqrt((radiusPt.x - center.x)**2 + (radiusPt.y - center.y)**2);
+                    }
+                    if (r === undefined || !isFinite(cx)) return null;
+                    return { type: 'circle', center: {x: cx, y: cy}, r, originalId: obj.id, isInverted: getInverted };
+                }
+                default: return null;
+            }
+        }
 
-            const poincareCircleGeom = { type: 'circle', center: INVERSION_CENTER, r: INVERSION_RADIUS };
-            geometry.push(poincareCircleGeom);
+        function lineLineIntersection(l1, l2) {
+            const d = (l1.p1.x - l1.p2.x) * (l2.p1.y - l2.p2.y) - (l1.p1.y - l1.p2.y) * (l2.p1.x - l2.p2.x);
+            if (Math.abs(d) < 1e-9) return null;
 
-            for (let i = 0; i < geometry.length; i++) {
-                for (let j = i + 1; j < geometry.length; j++) {
-                    const g1 = geometry[i];
-                    const g2 = geometry[j];
+            const t = ((l1.p1.x - l2.p1.x) * (l2.p1.y - l2.p2.y) - (l1.p1.y - l2.p1.y) * (l2.p1.x - l2.p2.x)) / d;
+            return { x: l1.p1.x + t * (l1.p2.x - l1.p1.x), y: l1.p1.y + t * (l1.p2.y - l1.p1.y) };
+        }
 
+        function lineCircleIntersections(line, circle) {
+            const { p1, p2 } = line; const { center, r } = circle;
+            const dx = p2.x - p1.x, dy = p2.y - p1.y, A = dx * dx + dy * dy;
+            const B = 2 * (dx * (p1.x - center.x) + dy * (p1.y - center.y));
+            const C = (p1.x - center.x)**2 + (p1.y - center.y)**2 - r * r;
+            const det = B * B - 4 * A * C;
+            if (det < 1e-9) return [];
+            const results = [];
+            const t1 = (-B + Math.sqrt(det)) / (2 * A);
+            results.push({ x: p1.x + t1 * dx, y: p1.y + t1 * dy });
+            if (det > 1e-9) {
+                const t2 = (-B - Math.sqrt(det)) / (2 * A);
+                results.push({ x: p1.x + t2 * dx, y: p1.y + t2 * dy });
+            }
+            return results;
+        }
+
+        function circleCircleIntersections(c1, c2) {
+            const { center: cen1, r: r1 } = c1; const { center: cen2, r: r2 } = c2;
+            const dx = cen2.x - cen1.x, dy = cen2.y - cen1.y, d = Math.sqrt(dx*dx + dy*dy);
+            if (d > r1 + r2 || d < Math.abs(r1 - r2) || d === 0) return [];
+            const a = (r1*r1 - r2*r2 + d*d) / (2 * d);
+            const h = Math.sqrt(Math.max(0, r1*r1 - a*a));
+            const x2 = cen1.x + a * (dx / d), y2 = cen1.y + a * (dy / d);
+            const results = [{ x: x2 + h * (dy / d), y: y2 - h * (dx / d) }];
+            if (h > 1e-9) results.push({ x: x2 - h * (dy / d), y: y2 + h * (dx / d) });
+            return results;
+        }
+
+        function getAllIntersections(worldPos) {
+            const allGeom = [];
+            objects.forEach(obj => {
+                const geom = getGeom(obj, false);
+                if (geom) allGeom.push(geom);
+                if (viewMode === 'integrated') {
+                    const invertedGeom = getGeom(obj, true);
+                    if (invertedGeom) allGeom.push(invertedGeom);
+                }
+            });
+            allGeom.push({ type: 'circle', center: INVERSION_CENTER, r: INVERSION_RADIUS, originalId: -1, isInverted: false });
+            
+            const intersections = [];
+            for (let i = 0; i < allGeom.length; i++) {
+                for (let j = i + 1; j < allGeom.length; j++) {
+                    const g1 = allGeom[i], g2 = allGeom[j];
                     if (g1.type === 'line' && g2.type === 'line') {
-                        const p = lineLineIntersection(g1.p1, g1.p2, g2.p1, g2.p2);
-                        if (p) intersections.push(p);
+                        const p = lineLineIntersection(g1, g2); if (p) intersections.push(p);
                     } else if (g1.type === 'line' && g2.type === 'circle') {
-                        intersections.push(...lineCircleIntersections(g1.p1, g1.p2, g2.center, g2.r));
+                        intersections.push(...lineCircleIntersections(g1, g2));
                     } else if (g1.type === 'circle' && g2.type === 'line') {
-                        intersections.push(...lineCircleIntersections(g2.p1, g2.p2, g1.center, g1.r));
+                        intersections.push(...lineCircleIntersections(g2, g1));
                     } else if (g1.type === 'circle' && g2.type === 'circle') {
-                        intersections.push(...circleCircleIntersections(g1.center, g1.r, g2.center, g2.r));
+                        intersections.push(...circleCircleIntersections(g1, g2));
                     }
                 }
             }
@@ -679,16 +801,16 @@
         function getClosestPointObject(worldPos) {
             let closestPoint = null;
             let min_dist_sq = (5 / camera.zoom)**2;
-
-            // Include origin in this check
-            const distSqOrigin = (worldPos.x - INVERSION_CENTER.x)**2 + (worldPos.y - INVERSION_CENTER.y)**2;
+            
+            const origin = { type: 'point', id: 0, x: INVERSION_CENTER.x, y: INVERSION_CENTER.y };
+            const distSqOrigin = (worldPos.x - origin.x)**2 + (worldPos.y - origin.y)**2;
             if (distSqOrigin < min_dist_sq) {
                 min_dist_sq = distSqOrigin;
-                closestPoint = { type: 'point', id: 0, x: INVERSION_CENTER.x, y: INVERSION_CENTER.y };
+                closestPoint = origin;
             }
 
             for (const obj of objects) {
-                if (obj.type === 'point') {
+                if (obj.type === 'point' && !obj.dependency) {
                     const distSq = (obj.x - worldPos.x)**2 + (obj.y - worldPos.y)**2;
                     if (distSq < min_dist_sq) {
                         min_dist_sq = distSq;
@@ -702,83 +824,73 @@
         function getSnapPoint(worldPos) {
             const snapRadiusSq = (5 / camera.zoom)**2;
 
-            // Priority 1: Snap to existing points (including origin) and intersections
-            let closestHighPrioritySnap = null;
-            let minHighPriorityDistSq = snapRadiusSq;
+            let closestSnap = null;
+            let minSnapDistSq = snapRadiusSq;
 
-            // Check manual points + origin
+            // P1: Manual points & Origin
             const closestManualPoint = getClosestPointObject(worldPos);
             if (closestManualPoint) {
                  const distSq = (closestManualPoint.x - worldPos.x)**2 + (closestManualPoint.y - worldPos.y)**2;
-                 if (distSq < minHighPriorityDistSq) {
-                     minHighPriorityDistSq = distSq;
-                     closestHighPrioritySnap = closestManualPoint;
+                 if (distSq < minSnapDistSq) {
+                     minSnapDistSq = distSq;
+                     closestSnap = closestManualPoint;
                  }
             }
 
-            // Check intersections
+            // P1: Intersections
             const intersections = getAllIntersections();
             for (const p of intersections) {
                 const distSq = (p.x - worldPos.x)**2 + (p.y - worldPos.y)**2;
-                if (distSq < minHighPriorityDistSq) {
-                    minHighPriorityDistSq = distSq;
-                    closestHighPrioritySnap = p;
+                if (distSq < minSnapDistSq) {
+                    minSnapDistSq = distSq;
+                    closestSnap = p;
                 }
             }
-            if (closestHighPrioritySnap) return closestHighPrioritySnap;
+            if (closestSnap) return closestSnap;
 
-            // Priority 2: Snap to existing lines and circles
-            let closestShapeSnap = null;
-            let minShapeDistSq = snapRadiusSq;
-            for (const obj of objects) {
-                let closestPtOnShape = null;
-                if (obj.type === 'line') {
-                    const p1 = getPointById(obj.p1Id), p2 = getPointById(obj.p2Id);
-                    if (!p1 || !p2) continue;
-                    const l2 = (p1.x - p2.x)**2 + (p1.y - p2.y)**2;
-                    if (l2 < 1e-9) continue;
-                    const t = ((worldPos.x - p1.x) * (p2.x - p1.x) + (worldPos.y - p1.y) * (p2.y - p1.y)) / l2;
-                    closestPtOnShape = { x: p1.x + t * (p2.x - p1.x), y: p1.y + t * (p2.y - p1.y) };
-                } else if (obj.type === 'circle') {
-                    const center = getPointById(obj.centerId), radiusPt = getPointById(obj.radiusId);
-                    if (!center || !radiusPt) continue;
-                    const r = Math.sqrt((radiusPt.x - center.x)**2 + (radiusPt.y - center.y)**2);
-                    const dx = worldPos.x - center.x, dy = worldPos.y - center.y;
-                    const distToCenter = Math.sqrt(dx * dx + dy * dy);
-                    if (distToCenter > 1e-6) {
-                        closestPtOnShape = { x: center.x + (dx / distToCenter) * r, y: center.y + (dy / distToCenter) * r };
+            // P2: Inverted points (integrated view only)
+            if (viewMode === 'integrated') {
+                 for (const obj of objects) {
+                    if (obj.type === 'point') {
+                        const p_inv = invertPoint(obj);
+                        const distSq = (p_inv.x - worldPos.x)**2 + (p_inv.y - worldPos.y)**2;
+                        if (distSq < minSnapDistSq) {
+                            minSnapDistSq = distSq;
+                            closestSnap = { ...p_inv, dependency: { type: 'inversion', targetId: obj.id }};
+                        }
                     }
                 }
+            }
+            if (closestSnap) return closestSnap;
 
+            // P3: On-shape projections
+            const allGeom = [];
+            objects.forEach(obj => {
+                const geom = getGeom(obj, false); if (geom) allGeom.push(geom);
+                if (viewMode === 'integrated') { const invertedGeom = getGeom(obj, true); if (invertedGeom) allGeom.push(invertedGeom); }
+            });
+            allGeom.push({ type: 'circle', center: INVERSION_CENTER, r: INVERSION_RADIUS, originalId: -1, isInverted: false });
+            
+            for (const geom of allGeom) {
+                let closestPtOnShape = null;
+                if (geom.type === 'line') {
+                    const l2 = (geom.p1.x - geom.p2.x)**2 + (geom.p1.y - geom.p2.y)**2; if (l2 < 1e-9) continue;
+                    const t = ((worldPos.x - geom.p1.x) * (geom.p2.x - geom.p1.x) + (worldPos.y - geom.p1.y) * (geom.p2.y - geom.p1.y)) / l2;
+                    closestPtOnShape = { x: geom.p1.x + t * (geom.p2.x - geom.p1.x), y: geom.p1.y + t * (geom.p2.y - geom.p1.y) };
+                } else if (geom.type === 'circle') {
+                    const dx = worldPos.x - geom.center.x, dy = worldPos.y - geom.center.y, dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist > 1e-6) closestPtOnShape = { x: geom.center.x + (dx / dist) * geom.r, y: geom.center.y + (dy / dist) * geom.r };
+                }
                 if (closestPtOnShape) {
                     const distSq = (worldPos.x - closestPtOnShape.x)**2 + (worldPos.y - closestPtOnShape.y)**2;
-                    if (distSq < minShapeDistSq) {
-                        minShapeDistSq = distSq;
-                        closestShapeSnap = closestPtOnShape;
+                    if (distSq < minSnapDistSq) {
+                        minSnapDistSq = distSq;
+                        closestSnap = closestPtOnShape;
                     }
                 }
             }
-            if (closestShapeSnap) return closestShapeSnap;
-
-            // Priority 3: Snap to inversion circle
-            let closestBaseSnap = null;
-            let minBaseDistSq = snapRadiusSq;
             
-            const dx_inv = worldPos.x - INVERSION_CENTER.x;
-            const dy_inv = worldPos.y - INVERSION_CENTER.y;
-            const distToCenter_inv = Math.sqrt(dx_inv * dx_inv + dy_inv * dy_inv);
-            if (distToCenter_inv > 1e-6) {
-                const closestX = INVERSION_CENTER.x + (dx_inv / distToCenter_inv) * INVERSION_RADIUS;
-                const closestY = INVERSION_CENTER.y + (dy_inv / distToCenter_inv) * INVERSION_RADIUS;
-                const distSqCircle = (worldPos.x - closestX)**2 + (worldPos.y - closestY)**2;
-                if (distSqCircle < minBaseDistSq) {
-                    minBaseDistSq = distSqCircle;
-                    closestBaseSnap = { x: closestX, y: closestY };
-                }
-            }
-            if (closestBaseSnap) return closestBaseSnap;
-            
-            return null;
+            return closestSnap;
         }
 
         function getObjectAt(worldPos, typeFilter = null) {
@@ -848,7 +960,7 @@
                 if (snapTarget.id !== undefined) {
                     targetPoint = snapTarget;
                 } else {
-                    targetPoint = { type: 'point', id: nextId++, x: snapTarget.x, y: snapTarget.y };
+                    targetPoint = { type: 'point', id: nextId++, x: snapTarget.x, y: snapTarget.y, dependency: snapTarget.dependency || null };
                     objects.push(targetPoint);
                 }
 
@@ -874,7 +986,7 @@
                 saveState();
                 const [p1, p2] = selections;
                 const midX = (p1.x + p2.x)/2, midY = (p1.y + p2.y)/2, dx = p2.x - p1.x, dy = p2.y - p1.y;
-                const p3 = {type:'point', id:nextId++, x:midX-dy, y:midY+dx}, p4 = {type:'point', id:nextId++, x:midX+dy, y:midY-dx};
+                const p3 = {type:'point', id:nextId++, x:midX-dy, y:midY+dx, dependency: null}, p4 = {type:'point', id:nextId++, x:midX+dy, y:midY-dx, dependency: null};
                 objects.push(p3, p4, {type:'line', id:nextId++, p1Id: p3.id, p2Id: p4.id});
                 resetConstruction();
             } else if (tool === 'perp_from_point' && step === 1) {
@@ -883,7 +995,7 @@
                 const pA=getPointById(line.p1Id), pB=getPointById(line.p2Id);
                 const l2=(pA.x-pB.x)**2 + (pA.y-pB.y)**2; if(l2 < 1e-9) { resetConstruction(); return; }
                 const t=((point.x-pA.x)*(pB.x-pA.x)+(point.y-pA.y)*(pB.y-pA.y))/l2;
-                const projPoint={type:'point',id:nextId++,x:pA.x+t*(pB.x-pA.x),y:pA.y+t*(pB.y-pA.y)};
+                const projPoint={type:'point',id:nextId++,x:pA.x+t*(pB.x-pA.x),y:pA.y+t*(pB.y-pA.y), dependency: null};
                 objects.push(projPoint, {type:'line',id:nextId++,p1Id:point.id,p2Id:projPoint.id});
                 resetConstruction();
             } else if (tool === 'perp_on_line' && step === 1) {
@@ -891,7 +1003,7 @@
                 const [line, point] = selections;
                 const pA=getPointById(line.p1Id), pB=getPointById(line.p2Id);
                 const dx=pB.x-pA.x, dy=pB.y-pA.y;
-                const p_end={type:'point',id:nextId++,x:point.x-dy,y:point.y+dx};
+                const p_end={type:'point',id:nextId++,x:point.x-dy,y:point.y+dx, dependency: null};
                 objects.push(p_end, {type:'line',id:nextId++,p1Id:point.id,p2Id:p_end.id});
                 resetConstruction();
             } else if (tool === 'angle_bisector' && step === 2) {
@@ -901,7 +1013,7 @@
                 const l1=Math.sqrt(v1x*v1x+v1y*v1y), l2=Math.sqrt(v2x*v2x+v2y*v2y);
                 if(l1 < 1e-9 || l2 < 1e-9){ resetConstruction(); return; }
                 const bisectorX=(v1x/l1)+(v2x/l2), bisectorY=(v1y/l1)+(v2y/l2);
-                const p_end={type:'point',id:nextId++,x:pB.x+bisectorX,y:pB.y+bisectorY};
+                const p_end={type:'point',id:nextId++,x:pB.x+bisectorX,y:pB.y+bisectorY, dependency: null};
                 objects.push(p_end, {type:'line',id:nextId++,p1Id:pB.id,p2Id:p_end.id});
                 resetConstruction();
             }
@@ -911,7 +1023,7 @@
         }
 
         function handleMouseDown(e) {
-            if (e.target.closest('#toolbar') || e.target.closest('.color-picker')) return;
+            if (e.target.closest('#toolbar') || e.target.closest('.color-picker-wrapper') || e.target.closest('#history-controls') || e.target.closest('#view-toggle')) return;
             const worldPos = screenToWorld(inputSvg, e.clientX, e.clientY);
             if (e.ctrlKey) { dragInfo.camera = true; dragInfo.start = { x: e.clientX, y: e.clientY }; return; }
             
@@ -920,7 +1032,7 @@
             switch (activeTool) {
                 case 'select':
                     dragInfo.target = getObjectAt(worldPos, 'point');
-                    if (dragInfo.target && dragInfo.target.id !== 0) {
+                    if (dragInfo.target && dragInfo.target.id !== 0 && !dragInfo.target.dependency) {
                         saveState(); // Save state before starting the move
                         dragInfo.moved = false;
                     } else {
@@ -931,7 +1043,7 @@
                     saveState();
                     const snapLocation = getSnapPoint(worldPos);
                     const coords = snapLocation || worldPos;
-                    objects.push({ type: 'point', id: nextId++, x: coords.x, y: coords.y });
+                    objects.push({ type: 'point', id: nextId++, x: coords.x, y: coords.y, dependency: snapLocation?.dependency || null });
                     render();
                     break;
                 }
@@ -942,7 +1054,7 @@
                     } else {
                         saveState(); // Save state when adding a new point implicitly
                         const coords = currentSnap || worldPos;
-                        targetPoint = { type: 'point', id: nextId++, x: coords.x, y: coords.y };
+                        targetPoint = { type: 'point', id: nextId++, x: coords.x, y: coords.y, dependency: currentSnap?.dependency || null };
                         objects.push(targetPoint);
                     }
                     if (!constructionState.tempPoint) {
@@ -950,9 +1062,8 @@
                     } else {
                         if (targetPoint.id !== constructionState.tempPoint.p1Id) {
                             if (!currentSnap || currentSnap.id === undefined) {
-                                // If second point was also new, the first save was sufficient.
+                                // Handled by first save
                             } else {
-                                // If the second point exists, we need a new history state
                                 saveState();
                             }
                             if (activeTool==='line') objects.push({ type: 'line', id: nextId++, p1Id: constructionState.tempPoint.p1Id, p2Id: targetPoint.id });
@@ -1010,7 +1121,6 @@
         
         function handleMouseUp(e) {
             if (dragInfo.target && !dragInfo.moved) {
-                // Clicked without moving, so pop the unnecessary history state.
                 undoStack.pop();
                 updateHistoryButtons();
             }
@@ -1030,19 +1140,37 @@
         }
 
         // --- Event Listeners & Setup ---
-        function setupColorPicker(viewId, colorKey) {
-            const view = document.getElementById(viewId), btn = view.querySelector('.color-picker-btn'), input = view.querySelector('.color-picker-input');
-            btn.style.backgroundColor = colors[colorKey];
-            btn.addEventListener('click', () => { btn.style.display='none'; input.style.display='block'; input.value=colors[colorKey]; input.focus(); input.select(); });
-            const applyColor = () => {
-                const newColor = input.value.trim();
-                if (/^#([0-9A-F]{3}){1,2}$/i.test(newColor) || /^[a-z]+$/i.test(newColor)) {
-                    colors[colorKey] = newColor; btn.style.backgroundColor = newColor; render();
+        function setupColorPicker(pickerElement, colorKey) {
+            if (!pickerElement) return;
+            const btn = pickerElement.querySelector('.color-picker-btn');
+            const popup = pickerElement.querySelector('.color-picker-popup');
+            const input = pickerElement.querySelector('.color-picker-input');
+            const slider = pickerElement.querySelector('.opacity-slider');
+            
+            btn.style.backgroundColor = colors[colorKey].hex;
+            
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                popup.style.display = popup.style.display === 'flex' ? 'none' : 'flex';
+                input.value = colors[colorKey].hex;
+                slider.value = colors[colorKey].alpha;
+            });
+            
+            input.addEventListener('input', () => {
+                const newHex = input.value.trim();
+                 if (/^#([0-9A-F]{3}){1,2}$/i.test(newHex) || /^[a-z]+$/i.test(newHex)) {
+                    colors[colorKey].hex = newHex;
+                    document.querySelectorAll(`.color-picker[data-colorkey="${colorKey}"] .color-picker-btn`).forEach(b => b.style.backgroundColor = newHex);
+                    render();
                 }
-                input.style.display = 'none'; btn.style.display = 'block';
-            };
-            input.addEventListener('keydown', e => { if (e.key === 'Enter') { applyColor(); e.preventDefault(); } else if (e.key === 'Escape') { input.style.display='none'; btn.style.display='block'; } });
-            input.addEventListener('blur', applyColor);
+            });
+
+            slider.addEventListener('input', () => {
+                colors[colorKey].alpha = parseFloat(slider.value);
+                render();
+            });
+
+            pickerElement.setAttribute('data-colorkey', colorKey);
         }
 
         function setupEventListeners() {
@@ -1050,6 +1178,10 @@
             window.addEventListener('mousemove', handleMouseMove);
             window.addEventListener('mouseup', handleMouseUp);
             contentWrapper.addEventListener('wheel', handleWheel, { passive: false });
+
+            document.body.addEventListener('click', () => {
+                 document.querySelectorAll('.color-picker-popup').forEach(p => p.style.display = 'none');
+            });
 
             toolbar.addEventListener('click', e => {
                 const button = e.target.closest('.tool-button'); if (!button) return;
@@ -1074,23 +1206,27 @@
             
             toggleButton.addEventListener('click', () => {
                 document.body.classList.toggle('toolbar-closed');
-                toolbar.classList.toggle('closed'); 
-                contentWrapper.classList.toggle('toolbar-closed');
-                toggleButton.innerHTML = toolbar.classList.contains('closed') ? '&gt;' : '&lt;';
+                toggleButton.innerHTML = document.body.classList.contains('toolbar-closed') ? '&gt;' : '&lt;';
                 setTimeout(() => window.dispatchEvent(new Event('resize')), 300);
             });
             
+            viewToggle.addEventListener('click', (e) => {
+                if (e.target.tagName === 'BUTTON') {
+                    viewMode = e.target.dataset.mode;
+                    document.body.classList.toggle('integrated-view', viewMode === 'integrated');
+                    document.querySelectorAll('#view-toggle button').forEach(b => b.classList.remove('active'));
+                    e.target.classList.add('active');
+                    window.dispatchEvent(new Event('resize')); 
+                }
+            });
+
             window.addEventListener('resize', render);
             window.addEventListener('keydown', e => {
                 if (document.activeElement.tagName === 'INPUT') return;
                 
                 if (e.ctrlKey && e.key.toLowerCase() === 'z') {
                     e.preventDefault();
-                    if (e.shiftKey) {
-                        redo();
-                    } else {
-                        undo();
-                    }
+                    if (e.shiftKey) { redo(); } else { undo(); }
                     return;
                 }
 
@@ -1106,12 +1242,14 @@
             undoBtn.addEventListener('click', undo);
             redoBtn.addEventListener('click', redo);
             
-            setupColorPicker('input-view', 'input'); setupColorPicker('output-view', 'output');
+            setupColorPicker(document.getElementById('input-color-picker'), 'input');
+            setupColorPicker(document.getElementById('output-color-picker-integrated'), 'output');
+            setupColorPicker(document.getElementById('output-color-picker-split'), 'output');
         }
         
         // --- Initialization ---
         document.querySelector('.tool-button[data-tool="select"]').classList.add('active');
-        saveState(); // Save initial empty state
+        saveState(true); // Save initial empty state
         updateHistoryButtons();
         setupEventListeners();
         render();
